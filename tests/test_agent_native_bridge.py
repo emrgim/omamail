@@ -552,13 +552,15 @@ else:
                 {'type':'text','sessionID':'ses_test123','part':{'id':'part1','type':'text','text':answer}},
                 {'type':'step_finish','part':{'reason':'stop'}}]
         elif provider == 'hermes':
-            session = session or '20250305_091523_a1b2c3'
+            session = session or ('local-' + 'ab' * 32)
             events = [
-                {'type':'system','subtype':'init','session_id':session,'model':'fixture'},
-                {'type':'tool_use','name':'terminal','input':'HIDDEN tool'},
+                {'type':'system','subtype':'init','session_id':'','model':'grok-4.7'},
                 {'type':'text','text':'Hello '},
+                {'type':'tool_use','name':'terminal','input':'HIDDEN tool','tool_call_id':'call-1'},
                 {'type':'text','text':'مرحبا'},
-                {'type':'result','session_id':session,'exit_code':0,'text':answer}]
+                {'type':'result','session_id':session,'exit_code':0,'text':answer,
+                 'tokens':{'input':1,'output':2,'total':3,'cache_read':0,'cache_write':0},
+                 'duration_ms':4}]
         else:
             events = [
                 {'type':'thread.started','thread_id':legacy.SESSION},
@@ -566,10 +568,14 @@ else:
                 {'type':'item.completed','item':{'type':'reasoning','text':'HIDDEN reasoning'}},
                 {'type':'item.completed','item':{'id':'item1','type':'agent_message','text':answer}},
                 {'type':'turn.completed'}]
-        banner = ''
         if provider == 'hermes':
             banner = 'print(' + repr('Session: ' + session) + ', flush=True)\n'
-        self.tool(provider, prelude + '\n' + banner + '\n'.join('emit('+repr(e)+')' for e in events) + '\n' + suffix)
+            emitted = [events[0], events[1]]
+            head = '\n'.join('emit('+repr(e)+')' for e in emitted)
+            tail = '\n'.join('emit('+repr(e)+')' for e in events[2:])
+            self.tool(provider, prelude + '\n' + head + '\n' + banner + tail + '\n' + suffix)
+            return
+        self.tool(provider, prelude + '\n' + '\n'.join('emit('+repr(e)+')' for e in events) + '\n' + suffix)
 
     def test_native_providers_and_models_survive_default_changes_and_continue_sessions(self):
         for provider in ('opencode','codex','hermes'):
@@ -658,7 +664,7 @@ else:
         self.assertEqual(list(self.store.glob('*/job.json')), before)
 
     def test_hermes_config_flags_local_session_and_missing_endpoint(self):
-        session = 'local-a1b2c3d4'
+        session = 'local-' + 'cd' * 32
         self.provider_agent('hermes', session=session)
         self.tool('omarchy-default-agent', 'print("hermes")')
         ident = self.new()

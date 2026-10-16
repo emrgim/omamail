@@ -34,6 +34,15 @@ impl ProviderStream {
     pub fn session_id(&self) -> &str {
         self.display.session_id()
     }
+    /// A Hermes stdout banner such as `Session: local-<hex>`. An id that is not a
+    /// Hermes session is a diagnostic and is ignored. A second, different valid id fails.
+    pub(super) fn note_stdout_session(&mut self, id: &str) -> Result<bool, &'static str> {
+        if !self.provider.session(id) {
+            return Ok(false);
+        }
+        self.display.set_session(id)?;
+        Ok(true)
+    }
     pub fn final_seen(&self) -> bool {
         self.display.final_seen()
     }
@@ -78,6 +87,14 @@ impl ProviderStream {
             .filter(|s| self.provider.session(s))
             .ok_or("The AI returned an invalid session ID.")?;
         self.display.set_session(id)
+    }
+    /// Hermes writes `session_id: ""` on the opening init and fills the id later.
+    /// An empty or missing id is not a session. A non-empty invalid id still fails.
+    fn note_hermes_session(&mut self, value: &Value) -> Result<(), &'static str> {
+        if value.is_null() || value.as_str() == Some("") {
+            return Ok(());
+        }
+        self.session(value)
     }
     fn answer(&mut self, part: &Value) -> Result<(), &'static str> {
         let id = part["id"]
@@ -134,24 +151,27 @@ impl ProviderStream {
         } else if self.provider == Provider::Hermes {
             match kind {
                 "system" if value["subtype"] == "init" => {
-                    self.session(&value["session_id"])?;
+                    self.note_hermes_session(&value["session_id"])?;
                     self.display.begin();
                 }
-                "text" => {
+                // v0.22.1 stream-json sends assistant deltas as type `text`.
+                // `delta` is the same payload if a build names the event that way.
+                "text" | "delta" => {
                     if self.final_seen() {
                         return Err(INVALID);
                     }
-                    // Streamed deltas. Tool payloads never use this field.
-                    self.display
-                        .continue_answer(value["text"].as_str().ok_or(INVALID)?)?;
+                    let text = value
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .or_else(|| value.get("delta").and_then(Value::as_str))
+                        .ok_or(INVALID)?;
+                    self.display.continue_answer(text)?;
                 }
                 "tool_use" | "tool_result" => {
                     self.display.status(super::stream::label(&value["name"]));
                 }
                 "result" => {
-                    if value.get("session_id").is_some() {
-                        self.session(&value["session_id"])?;
-                    }
+                    self.note_hermes_session(&value["session_id"])?;
                     let code = value["exit_code"].as_i64().ok_or(FAILED)?;
                     if code != 0 || value.get("error").is_some_and(|error| !error.is_null()) {
                         return Err(FAILED);

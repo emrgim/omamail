@@ -152,7 +152,9 @@ fn completion_requires_identity_and_last_step_success() {
     assert_eq!(stream.session_id(), "ses_123Abc");
 }
 
-const HERMES_SESSION: &str = "20250305_091523_a1b2c3";
+/// Real v0.22.1 one-shot ids are `local-` plus 64 hex digits. Init leaves the id empty.
+const HERMES_SESSION: &str =
+    "local-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn hermes() -> ProviderStream {
     let mut stream = ProviderStream::new(
@@ -161,10 +163,15 @@ fn hermes() -> ProviderStream {
     )
     .unwrap();
     stream
-        .accept(
-            json!({"type":"system","subtype":"init","session_id":HERMES_SESSION,"model":"fixture"}),
-        )
+        .accept(json!({
+            "type": "system",
+            "subtype": "init",
+            "model": "grok-4.7",
+            "session_id": "",
+            "timestamp": 1
+        }))
         .unwrap();
+    assert!(stream.session_id().is_empty());
     stream
 }
 
@@ -172,29 +179,61 @@ fn hermes() -> ProviderStream {
 fn hermes_stream_keeps_deltas_drops_tool_payloads_and_requires_its_session() {
     let mut stream = hermes();
     stream
-        .accept(json!({"type":"text","text":"Hello "}))
+        .accept(json!({"type":"text","text":"Hello ","timestamp":2}))
         .unwrap();
     stream
-        .accept(json!({"type":"tool_use","name":"terminal","input":"SECRET tool"}))
+        .accept(json!({"type":"delta","delta":"there ","timestamp":3}))
         .unwrap();
     stream
-        .accept(json!({"type":"tool_result","name":"terminal","output":"SECRET result","is_error":false}))
+        .accept(json!({
+            "type": "tool_use",
+            "name": "terminal",
+            "tool_call_id": "call-1",
+            "input": "SECRET tool",
+            "timestamp": 4
+        }))
         .unwrap();
     stream
-        .accept(json!({"type":"text","text":"مرحبا"}))
+        .accept(json!({
+            "type": "tool_result",
+            "name": "terminal",
+            "tool_call_id": "call-1",
+            "output": "SECRET result",
+            "duration_ms": 4,
+            "is_error": false,
+            "timestamp": 5
+        }))
+        .unwrap();
+    stream
+        .accept(json!({"type":"text","text":"مرحبا","timestamp":6}))
         .unwrap();
     let partial = stream.display();
     assert!(
         stream
-            .accept(json!({"type":"result","session_id":HERMES_SESSION,"exit_code":0,"text":"Not the answer","error":null}))
+            .accept(json!({
+                "type": "result",
+                "session_id": HERMES_SESSION,
+                "exit_code": 0,
+                "text": "Not the answer",
+                "tokens": {"input": 1, "output": 1, "total": 2, "cache_read": 0, "cache_write": 0},
+                "duration_ms": 8
+            }))
             .is_err()
     );
     assert_eq!(stream.display(), partial);
+    assert!(stream.session_id().is_empty());
     stream
-        .accept(json!({"type":"result","session_id":HERMES_SESSION,"exit_code":0,"text":"Hello مرحبا","error":null}))
+        .accept(json!({
+            "type": "result",
+            "session_id": HERMES_SESSION,
+            "exit_code": 0,
+            "text": "Hello there مرحبا",
+            "tokens": {"input": 1, "output": 2, "total": 3, "cache_read": 0, "cache_write": 0},
+            "duration_ms": 9
+        }))
         .unwrap();
     assert!(stream.final_seen());
-    assert_eq!(stream.display()["output"], "Hello مرحبا");
+    assert_eq!(stream.display()["output"], "Hello there مرحبا");
     assert_eq!(stream.session_id(), HERMES_SESSION);
     let shown = stream.display();
     let answers: Vec<_> = shown["transcript"]
@@ -204,14 +243,14 @@ fn hermes_stream_keeps_deltas_drops_tool_payloads_and_requires_its_session() {
         .filter(|item| item["role"] == "assistant")
         .collect();
     assert_eq!(answers.len(), 1);
-    assert_eq!(answers[0]["text"], "Hello مرحبا");
+    assert_eq!(answers[0]["text"], "Hello there مرحبا");
     assert!(stream.display().to_string().contains("Using a tool"));
     assert!(!stream.display().to_string().contains("SECRET"));
     assert_eq!(
         stream.accept(json!({"type":"text","text":"more"})),
         Err(INVALID)
     );
-    assert_eq!(stream.display()["output"], "Hello مرحبا");
+    assert_eq!(stream.display()["output"], "Hello there مرحبا");
 
     let mut failed = hermes();
     failed.accept(json!({"type":"text","text":"Safe"})).unwrap();
@@ -225,23 +264,55 @@ fn hermes_stream_keeps_deltas_drops_tool_payloads_and_requires_its_session() {
 
     let mut unidentified = ProviderStream::new(Provider::Hermes, vec![]).unwrap();
     unidentified
+        .accept(json!({"type":"system","subtype":"init","session_id":"","model":"grok-4.7"}))
+        .unwrap();
+    unidentified
         .accept(json!({"type":"text","text":"answer"}))
         .unwrap();
-    assert!(
-        unidentified
-            .accept(json!({"type":"result","exit_code":0,"text":"answer"}))
-            .is_err()
+    assert_eq!(
+        unidentified.accept(json!({"type":"result","session_id":"","exit_code":0,"text":"answer"})),
+        Err(FAILED)
     );
     assert!(!unidentified.final_seen());
-    assert!(
+    assert!(unidentified.session_id().is_empty());
+    assert_eq!(
         ProviderStream::new(Provider::Hermes, vec![])
             .unwrap()
-            .accept(json!({"type":"system","subtype":"init","session_id":"latest"}))
-            .is_err()
+            .accept(json!({"type":"system","subtype":"init","session_id":"latest"})),
+        Err("The AI returned an invalid session ID.")
     );
     let mut local = ProviderStream::new(Provider::Hermes, vec![]).unwrap();
     local
-        .accept(json!({"type":"system","subtype":"init","session_id":"local-a1b2c3","model":""}))
+        .accept(json!({"type":"system","subtype":"init","session_id":"","model":"grok-4.7"}))
         .unwrap();
-    assert_eq!(local.session_id(), "local-a1b2c3");
+    assert!(!local.note_stdout_session("not-a-session").unwrap());
+    assert!(local.session_id().is_empty());
+    assert!(local.note_stdout_session(HERMES_SESSION).unwrap());
+    assert_eq!(local.session_id(), HERMES_SESSION);
+    assert_eq!(
+        local.note_stdout_session(
+            "local-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ),
+        Err("The AI changed session identity unexpectedly.")
+    );
+    assert_eq!(local.session_id(), HERMES_SESSION);
+    local.accept(json!({"type":"text","text":"Hi"})).unwrap();
+    local
+        .accept(json!({"type":"result","session_id":"","exit_code":0,"text":"Hi"}))
+        .unwrap();
+    assert!(local.final_seen());
+
+    let mut clash = hermes();
+    assert!(clash.note_stdout_session(HERMES_SESSION).unwrap());
+    assert_eq!(
+        clash.accept(json!({
+            "type": "result",
+            "session_id": "local-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "exit_code": 0,
+            "text": ""
+        })),
+        Err("The AI changed session identity unexpectedly.")
+    );
+    assert_eq!(clash.session_id(), HERMES_SESSION);
+    assert!(!clash.final_seen());
 }

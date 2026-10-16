@@ -310,11 +310,26 @@ fn accept_stdout_line(parser: &mut ProviderStream, line: &[u8]) -> Result<bool, 
             parser.accept(value)?;
             Ok(true)
         }
-        // Diagnostic lines such as `Session: local-<hex>` are not events.
+        // Hermes may print `Session: local-<hex>` (or `session_id:`) beside the
+        // JSONL. A valid id is the session. Anything else is a diagnostic.
         // A broken object or array is still invalid.
-        Err(_) if parser.provider() == Provider::Hermes && !json_prefix(line) => Ok(false),
+        Err(_) if parser.provider() == Provider::Hermes && !json_prefix(line) => {
+            if let Some(id) = hermes_session_banner(line) {
+                return parser.note_stdout_session(id);
+            }
+            Ok(false)
+        }
         Err(_) => Err(INVALID),
     }
+}
+
+fn hermes_session_banner(line: &[u8]) -> Option<&str> {
+    let text = std::str::from_utf8(line).ok()?.trim();
+    let id = text
+        .strip_prefix("Session:")
+        .or_else(|| text.strip_prefix("session_id:"))?
+        .trim();
+    if id.is_empty() { None } else { Some(id) }
 }
 
 fn json_prefix(line: &[u8]) -> bool {
