@@ -218,6 +218,7 @@ Item {
   }
   readonly property string aiModel: String(settings ? settings.aiModel || "" : "")
   readonly property bool backendCanChooseAgent: backend.ready && backend.apiVersion >= 6
+  readonly property bool backendCanHermes: backend.ready && backend.apiVersion >= 8
   readonly property bool backendCanAgentProposals: backend.ready && backend.apiVersion >= 6
   function setAiAgent(value) {
     if (String(value) === aiAgent) return

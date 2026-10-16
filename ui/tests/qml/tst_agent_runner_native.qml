@@ -172,6 +172,21 @@ Item {
       verify(runner.start({prompt:"Question"}))
       bridge.finish(0, null, {message:"agent_choose_claude"})
       verify(runner.lastError.indexOf("OpenCode, Codex or Claude") >= 0)
+      verify(runner.lastError.indexOf("Hermes") < 0)
+      bridge.apiVersion = 8
+      verify(runner.start({prompt:"Question"}))
+      bridge.finish(bridge.requests.length - 1, null, {message:"agent_choose_claude"})
+      verify(runner.lastError.indexOf("OpenCode, Codex or Claude or Hermes") >= 0)
+    }
+    function test_hermes_waits_for_api_8() {
+      runner.selectedAgent = "Hermes"
+      bridge.apiVersion = 7
+      verify(!runner.start({prompt:"Question"}))
+      compare(bridge.requests.length, 0)
+      verify(runner.lastError.indexOf("API 8") >= 0)
+      bridge.apiVersion = 8
+      verify(runner.start({prompt:"Question"}))
+      compare(bridge.requests[0].params.provider, "hermes")
     }
     function test_selection_cutoff_survives_reload_without_losing_new_chats() {
       runner.selectedAgent = "Codex"

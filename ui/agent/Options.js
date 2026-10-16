@@ -1,6 +1,6 @@
 .pragma library
 
-function agents() { return ["System default", "OpenCode", "Codex", "Claude"] }
+function agents() { return ["System default", "OpenCode", "Codex", "Claude", "Hermes"] }
 function agent(value) {
   var text = String(value || "System default")
   return agents().indexOf(text) >= 0 ? text : "System default"
@@ -24,6 +24,8 @@ function startOptions(payload, selectedAgent, selectedModel, apiVersion) {
   if (!validModel(model)) return { error: "Enter a model ID without spaces or control characters (up to 200 characters)." }
   if ((selected !== "" || model !== "") && !(Number(apiVersion) >= 6))
     return { error: "Update the mail backend to choose an AI agent or model (API 6 required)." }
+  if (selected === "hermes" && !(Number(apiVersion) >= 8))
+    return { error: "Update the mail backend to use Hermes (API 8 required)." }
   var params = {payload: payload}
   if (selected !== "") params.provider = selected
   if (model !== "") params.model = model

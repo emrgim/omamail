@@ -128,6 +128,49 @@ impl ProviderStream {
                 },
                 _ => (), // Reasoning and unknown metadata never enter the projection.
             }
+        } else if self.provider == Provider::Hermes {
+            match kind {
+                "system" if value["subtype"] == "init" => {
+                    self.session(&value["session_id"])?;
+                    self.display.begin();
+                }
+                "text" => {
+                    if self.final_seen() {
+                        return Err(INVALID);
+                    }
+                    // Streamed deltas. Tool payloads never use this field.
+                    self.display
+                        .continue_answer(value["text"].as_str().ok_or(INVALID)?)?;
+                }
+                "tool_use" | "tool_result" => {
+                    self.display.status(super::stream::label(&value["name"]));
+                }
+                "result" => {
+                    if value.get("session_id").is_some() {
+                        self.session(&value["session_id"])?;
+                    }
+                    let code = value["exit_code"].as_i64().ok_or(FAILED)?;
+                    if code != 0 || value.get("error").is_some_and(|error| !error.is_null()) {
+                        return Err(FAILED);
+                    }
+                    if let Some(text) = value.get("text").and_then(Value::as_str) {
+                        let output = self.display()["output"].as_str().unwrap_or("").to_owned();
+                        if output.is_empty() {
+                            if !text.is_empty() {
+                                self.display.continue_answer(text)?;
+                            }
+                        } else if let Some(suffix) = text.strip_prefix(&output) {
+                            if !suffix.is_empty() {
+                                self.display.continue_answer(suffix)?;
+                            }
+                        } else {
+                            return Err(INVALID);
+                        }
+                    }
+                    self.finish()?;
+                }
+                _ => (),
+            }
         } else {
             match kind {
                 "thread.started" => self.session(&value["thread_id"])?,

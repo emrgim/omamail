@@ -13,6 +13,16 @@ Item {
   property string resolvedProvider: ""
   property string availabilityError: "Checking the selected AI agent..."
   property int availabilitySerial: 0
+  function unavailableDefaultMessage() {
+    var choice = "Claude, Codex or OpenCode"
+    if (Number(backend && backend.apiVersion) >= 8) choice += " or Hermes"
+    return "Your system-default agent is not supported. Choose " + choice + " in Settings → AI."
+  }
+  function chooseAgentMessage() {
+    var choice = "OpenCode, Codex or Claude"
+    if (Number(backend && backend.apiVersion) >= 8) choice += " or Hermes"
+    return "Choose " + choice + " in Settings → AI, or select one as Omarchy's default."
+  }
   function refreshAvailability() {
     var serial = ++availabilitySerial
     if (!available()) {
@@ -36,7 +46,7 @@ Item {
       root.providerAvailable = !error && !!result && result.available === true
       root.availabilityError = root.providerAvailable ? "" : error
         ? "Could not check the selected AI agent."
-        : "Your system-default agent is not supported. Choose Claude, Codex or OpenCode in Settings → AI."
+        : unavailableDefaultMessage()
     })
   }
   property int selectionRevision: 0
@@ -230,7 +240,7 @@ Item {
           var code = String(error && error.message ? error.message : "")
           root.lastError = code === "agent_choose_claude"
             ? (Number(root.backend.apiVersion) >= 6
-              ? "Choose OpenCode, Codex or Claude in Settings → AI, or select one as Omarchy's default."
+              ? chooseAgentMessage()
               : "This backend supports Claude only. Select Claude as Omarchy's default AI agent.")
             : "Could not confirm AI started. Check the conversation before retrying."
           root.failed(root.lastError)

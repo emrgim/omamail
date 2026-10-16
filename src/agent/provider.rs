@@ -7,6 +7,7 @@ pub enum Provider {
     Claude,
     OpenCode,
     Codex,
+    Hermes,
 }
 
 impl Provider {
@@ -101,7 +102,7 @@ impl Provider {
                 }
                 super::codex::Profile::create(id)?.configure(&mut command)?;
             }
-            Self::OpenCode => {}
+            Self::OpenCode | Self::Hermes => {}
         }
         Ok(command)
     }
@@ -110,6 +111,7 @@ impl Provider {
             "claude" => Some(Self::Claude),
             "opencode" => Some(Self::OpenCode),
             "codex" => Some(Self::Codex),
+            "hermes" => Some(Self::Hermes),
             _ => None,
         }
     }
@@ -118,6 +120,7 @@ impl Provider {
             Self::Claude => "claude",
             Self::OpenCode => "opencode",
             Self::Codex => "codex",
+            Self::Hermes => "hermes",
         }
     }
     pub fn of_job(job: &Value) -> Result<Self, &'static str> {
@@ -134,6 +137,18 @@ impl Provider {
             id.strip_prefix("ses_").is_some_and(|s| {
                 (1..=128).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric())
             })
+        } else if self == Self::Hermes {
+            // CLI sessions use a 6-hex suffix; gateway sessions use 8. Titles,
+            // `latest` and prefixes are not accepted: only this exact id may
+            // cross argv as `--resume`.
+            let bytes = id.as_bytes();
+            // YYYYMMDD_HHMMSS_ + 6 hex (CLI) or 8 hex (gateway).
+            matches!(bytes.len(), 22 | 24)
+                && bytes[8] == b'_'
+                && bytes[15] == b'_'
+                && bytes[..8].iter().all(u8::is_ascii_digit)
+                && bytes[9..15].iter().all(u8::is_ascii_digit)
+                && bytes[16..].iter().all(u8::is_ascii_hexdigit)
         } else {
             super::jobs::session(id)
         }
@@ -178,6 +193,33 @@ impl Provider {
                     command.args(["resume", resume]);
                 }
                 command.arg("-");
+            }
+            Self::Hermes => {
+                // `hermes -z PROMPT` is the plain-text one-shot, but the prompt
+                // would cross argv and stdout has no session id. `chat` reads
+                // the untrusted body from stdin and emits stream-json, including
+                // the id `--resume` needs. Never `--continue` or `latest`.
+                // User MCP, hooks and tool selection stay unloaded. `todo` is
+                // the only built-in toolset and cannot send mail or run a shell.
+                // Hermes has no per-launch MCP config, so propose_draft is not
+                // attached; the answer stays text for the owner to apply.
+                command.args([
+                    "chat",
+                    "--oneshot",
+                    "--format",
+                    "stream-json",
+                    "--query-file",
+                    "-",
+                    "--ignore-rules",
+                    "--ignore-user-config",
+                    "--source",
+                    "tool",
+                    "-t",
+                    "todo",
+                ]);
+                if !resume.is_empty() {
+                    command.args(["--resume", resume]);
+                }
             }
         }
         if !model.is_empty() {

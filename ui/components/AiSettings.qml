@@ -43,7 +43,9 @@ Column {
     width: parent.width
     showLabel: false
     value: Options.agent(root.service ? root.service.aiAgent : "")
-    options: Options.agents().map(function(label) { return {label: label, value: label} })
+    options: Options.agents().filter(function(label) {
+      return label !== "Hermes" || (!!root.service && root.service.backendCanHermes === true)
+    }).map(function(label) { return {label: label, value: label} })
     enabled: root.available
     foreground: root.textColor
     accent: root.accentColor
@@ -76,6 +78,9 @@ Column {
     text: !root.available ? "Update the mail backend to choose an AI agent or model (API 6 required)."
       : root.error || (root.service.agentAvailable === false ? root.service.agentUnavailableReason + "\n" : "") + "System default follows Omarchy. Leave the model blank to use the agent's default. "
         + "OpenCode takes provider/model or provider/model#variant; Codex and Claude take model names. "
+        + (root.service && root.service.backendCanHermes === true
+          ? "Hermes takes a model name; a blank model uses Hermes' built-in default because Omamail does not read ~/.hermes/config.yaml. "
+          : "")
         + "Changing the agent or model starts fresh chats. Previous chats remain read-only in History."
     color: !root.available || root.error !== "" ? root.accentColor : root.dimColor
     font.family: root.panelFontFamily

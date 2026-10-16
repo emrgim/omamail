@@ -7,6 +7,11 @@ fn native_sessions_are_validated_for_their_provider() {
     assert!(Provider::Claude.session(uuid));
     assert!(!Provider::OpenCode.session(uuid));
     assert!(Provider::OpenCode.session("ses_f13832da5ffe1XDBt4dxwJ0DeM"));
+    assert!(Provider::Hermes.session("20250305_091523_a1b2c3"));
+    assert!(Provider::Hermes.session("20250305_091523_a1b2c3d4"));
+    assert!(!Provider::Hermes.session(uuid));
+    assert!(!Provider::Hermes.session("latest"));
+    assert!(!Provider::Hermes.session("20250305_091523_a1b2c3d"));
     for id in [
         "",
         "ses_",
@@ -15,7 +20,12 @@ fn native_sessions_are_validated_for_their_provider() {
         "--last",
         "ses_$(touch)",
     ] {
-        for provider in [Provider::Claude, Provider::Codex, Provider::OpenCode] {
+        for provider in [
+            Provider::Claude,
+            Provider::Codex,
+            Provider::OpenCode,
+            Provider::Hermes,
+        ] {
             assert!(!provider.session(id), "{id}");
         }
     }
@@ -90,6 +100,7 @@ fn commands_use_stdin_exact_continuations_and_noninteractive_permissions() {
                 assert!(args.contains(&"approval_policy=\"never\""));
                 assert!(args.contains(&"-"));
             }
+            Provider::Hermes => unreachable!("Hermes is asserted below"),
         }
         assert!(
             provider
@@ -104,5 +115,55 @@ fn commands_use_stdin_exact_continuations_and_noninteractive_permissions() {
             .command(Path::new("/private"), "", "")
             .unwrap_err(),
         "agent_server_required"
+    );
+    let hermes_id = "20250305_091523_a1b2c3";
+    let hermes = Provider::Hermes
+        .command(Path::new("/private"), hermes_id, "chosen-model")
+        .unwrap();
+    let args = hermes
+        .get_args()
+        .map(|s| s.to_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        Path::new(hermes.get_program()).file_name().unwrap(),
+        "hermes"
+    );
+    assert_eq!(
+        args,
+        vec![
+            "chat",
+            "--oneshot",
+            "--format",
+            "stream-json",
+            "--query-file",
+            "-",
+            "--ignore-rules",
+            "--ignore-user-config",
+            "--source",
+            "tool",
+            "-t",
+            "todo",
+            "--resume",
+            hermes_id,
+            "--model",
+            "chosen-model",
+        ]
+    );
+    assert!(!args.contains(&"-z"));
+    assert!(!args.contains(&"--yolo"));
+    assert!(!args.contains(&"--continue"));
+    assert!(!args.contains(&"--pass-session-id"));
+    assert!(
+        Provider::Hermes
+            .command(Path::new("/private"), "latest", "")
+            .is_err()
+    );
+    let fresh = Provider::Hermes
+        .command(Path::new("/private"), "", "")
+        .unwrap();
+    assert!(
+        !fresh
+            .get_args()
+            .any(|arg| arg == "--model" || arg == "--resume")
     );
 }

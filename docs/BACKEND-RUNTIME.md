@@ -100,6 +100,12 @@ Each conversation retains one native provider session, serializes follow-ups and
 
 The isolated provider launch preserves model/authentication configuration while excluding unrelated tools, plugins and hooks. The only mail-writing tool records a content-only draft proposal: account, recipients, threading and attachment ownership come from app-owned snapshots. Applying or sending a proposal requires a human action and uses the normal composer/outbox path. Delivery labels follow outbox receipts; the standard send toast provides Undo. Codex advertises the proposal namespace directly even for code-mode-only models, without general tool discovery.
 
+## API 8 Hermes agent
+
+Settings → AI can select Hermes, the Nous Research `hermes` CLI, when the connected backend is API 8. System default maps to Hermes when `omarchy-default-agent` prints `hermes`. API 6 and 7 backends keep Claude, Codex and OpenCode and refuse an explicit Hermes choice.
+
+Hermes is launched as `hermes chat --oneshot --format stream-json --query-file - --ignore-rules --ignore-user-config --source tool -t todo`, with `--resume` only for an exact session id and `--model` only when the owner set one. The one-shot `hermes -z PROMPT` is not used: the prompt would cross argv and that mode prints no session id, so a later turn could not continue. `latest` and `--continue` are never passed. `--ignore-rules` skips workspace rules, memory and preloaded skills. `--ignore-user-config` skips `~/.hermes/config.yaml` (user MCP, hooks, plugins and saved tool selection) while Hermes still loads credentials from its environment. `-t todo` replaces the default tool bundle with an in-session task list that cannot send mail or run a shell. Hermes has no per-launch MCP config, so `propose_draft` is not attached and the answer stays text for the owner to apply. A blank model does not read `~/.hermes/config.yaml`; Hermes uses its built-in default.
+
 Proposal cards show their saved From, To and optional Cc, Bcc and Reply-To. If routing in the corresponding open composer changes, direct card sending is disabled and rechecked at dispatch. Use this version applies subject/body without replacing the edited recipients; the normal composer Send then reviews and sends the current routing.
 
 ## API 7 sender name for IMAP and Outlook

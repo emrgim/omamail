@@ -1,5 +1,5 @@
 {
-  "apiVersion": 7,
+  "apiVersion": 8,
   "releasedApiVersion": 7,
   "protocolVersion": 1,
   "methods": [
@@ -1255,6 +1255,17 @@
       }
     },
     {
+      "name": "AI Hermes provider availability is data-only",
+      "method": "agent.providerStatus",
+      "params": {
+        "provider": "hermes"
+      },
+      "equals": {
+        "available": true,
+        "provider": "hermes"
+      }
+    },
+    {
       "name": "gmail message mutation answers with a queue ticket",
       "method": "gmail.trash",
       "params": {
@@ -1291,6 +1302,8 @@
   ],
   "unreleased": {
     "methods": [],
-    "cases": []
+    "cases": [
+      "AI Hermes provider availability is data-only"
+    ]
   }
 }

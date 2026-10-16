@@ -448,7 +448,7 @@ emit({'type':'result','subtype':'success','result':'','session_id':'11111111-222
         self.assertEqual(self.call('list',options={'paged':True,'offset':32})['jobs'],[])
 
     def test_crashed_worker_cannot_race_a_new_native_turn(self):
-        for provider in ('claude','opencode','codex'):
+        for provider in ('claude','opencode','codex','hermes'):
             with self.subTest(provider=provider):
                 self.tool('omarchy-default-agent', 'print('+repr(provider)+')')
                 if provider!='claude': self.provider_agent(provider)
@@ -485,11 +485,11 @@ emit({'type':'result','subtype':'success','result':'','session_id':'11111111-222
 
     def test_provider_status_never_starts_an_agent_or_creates_a_job(self):
         marker = self.root/'agent-started'
-        for provider in ('claude','codex','opencode'):
+        for provider in ('claude','codex','opencode','hermes'):
             self.tool(provider, 'from pathlib import Path\nPath('+repr(str(marker))+').touch()')
-        for selected in ('', 'unsupported', 'codex', 'opencode', 'claude'):
+        for selected in ('', 'unsupported', 'codex', 'opencode', 'claude', 'hermes'):
             self.tool('omarchy-default-agent', 'print('+repr(selected)+')')
-            supported = selected in ('claude','codex','opencode')
+            supported = selected in ('claude','codex','opencode','hermes')
             self.assertEqual(self.call('status'), {'available':supported,'provider':selected if supported else ''})
             self.assertFalse(marker.exists())
             self.assertFalse(list(self.store.glob('*/job.json')))
@@ -544,6 +544,14 @@ else:
                 {'type':'tool_use','part':{'state':{'input':'HIDDEN tool','output':'HIDDEN result'}}},
                 {'type':'text','sessionID':'ses_test123','part':{'id':'part1','type':'text','text':answer}},
                 {'type':'step_finish','part':{'reason':'stop'}}]
+        elif provider == 'hermes':
+            session = '20250305_091523_a1b2c3'
+            events = [
+                {'type':'system','subtype':'init','session_id':session,'model':'fixture'},
+                {'type':'tool_use','name':'terminal','input':'HIDDEN tool'},
+                {'type':'text','text':'Hello '},
+                {'type':'text','text':'مرحبا'},
+                {'type':'result','session_id':session,'exit_code':0,'text':answer}]
         else:
             events = [
                 {'type':'thread.started','thread_id':legacy.SESSION},
@@ -554,7 +562,7 @@ else:
         self.tool(provider, prelude + '\n' + '\n'.join('emit('+repr(e)+')' for e in events) + '\n' + suffix)
 
     def test_native_providers_and_models_survive_default_changes_and_continue_sessions(self):
-        for provider in ('opencode','codex'):
+        for provider in ('opencode','codex','hermes'):
             with self.subTest(provider=provider):
                 self.provider_agent(provider)
                 self.tool('omarchy-default-agent', f'print({provider!r})')
@@ -570,7 +578,18 @@ else:
                 self.assertEqual(projection.returncode,0,projection.stdout or projection.stderr)
                 self.assertEqual(json.loads(projection.stdout)['result']['byMessage']['1:INBOX']['provider'],provider)
                 self.assertNotIn('HIDDEN', json.dumps(shown))
-                self.assertNotIn('--model', json.loads((self.artifacts/ident/'argv.json').read_text()))
+                argv = json.loads((self.artifacts/ident/'argv.json').read_text())
+                self.assertNotIn('--model', argv)
+                if provider == 'hermes':
+                    self.assertIn('--query-file', argv)
+                    self.assertIn('--ignore-user-config', argv)
+                    self.assertIn('--ignore-rules', argv)
+                    self.assertEqual(argv[argv.index('-t')+1], 'todo')
+                    for banned in ('-z', '--yolo', '--continue', '--pass-session-id', 'latest'):
+                        self.assertNotIn(banned, argv)
+                    supplied = (self.artifacts/ident/'stdin.txt').read_text()
+                    self.assertIn('plain text', supplied)
+                    self.assertNotIn('propose_draft', supplied)
                 self.tool('omarchy-default-agent', 'raise SystemExit("must not resolve default for an override or continuation")')
                 selected = self.call('new', value={'messageId':'synthetic','prompt':'SECRET-PROMPT'},
                                      options={'provider':provider,'model':'fixture/model#variant'})['id']
@@ -588,9 +607,14 @@ else:
                 self.assertEqual(argv[argv.index('--model')+1], 'fixture/model#variant')
                 if provider == 'opencode':
                     self.assertEqual(argv[argv.index('--session')+1],selected_job['job']['sessionId'])
+                elif provider == 'hermes':
+                    self.assertEqual(argv[argv.index('--resume')+1], result['job']['sessionId'])
+                    for banned in ('-z', '--yolo', '--continue', '--pass-session-id', 'latest'):
+                        self.assertNotIn(banned, argv)
                 else:
                     self.assertIn('resume',argv)
-                self.assertIn(result['job']['sessionId'] if provider == 'opencode' else legacy.SESSION, argv)
+                expected = result['job']['sessionId'] if provider in ('opencode','hermes') else legacy.SESSION
+                self.assertIn(expected, argv)
                 self.assertIn('"prompt":"Follow-up"', (self.artifacts/child/'stdin.txt').read_text())
                 self.assertNotIn('SECRET-', (self.artifacts/selected/'argv.json').read_text())
                 for options in ({'provider':'claude'},{'model':'different'}):
@@ -615,7 +639,7 @@ else:
         self.assertEqual(list(self.store.glob('*/job.json')), before)
 
     def test_failed_new_provider_output_never_becomes_applicable(self):
-        for provider in ('opencode','codex'):
+        for provider in ('opencode','codex','hermes'):
             for suffix in ('raise SystemExit(3)', 'emit({"type":"error","message":"HIDDEN failure"})'):
                 self.provider_agent(provider, suffix)
                 self.tool('omarchy-default-agent', f'print({provider!r})')
@@ -627,7 +651,7 @@ else:
                 self.assertNotIn('HIDDEN', json.dumps(shown))
 
     def test_stopped_turns_continue_for_every_provider_without_applying_partial_output(self):
-        for provider in ('claude','opencode','codex'):
+        for provider in ('claude','opencode','codex','hermes'):
             with self.subTest(provider=provider):
                 self.tool('omarchy-default-agent',f'print({provider!r})')
                 if provider == 'claude': self.agent(legacy.SUCCESS+'\ntime.sleep(30)')

@@ -80,9 +80,15 @@ pub async fn run(id: &str) -> Result<(), &'static str> {
             if resumed {
                 text
             } else {
-                format!(
-                    "{MAIL_ROLE}\n\n{INSTRUCTIONS}When the owner asks to create or revise an email draft, call the available propose_draft tool with the complete subject and body. The tool records a proposal for human review; it does not edit or send mail. Do not substitute a plain-text draft for the tool call. For other questions, answer normally.\n\n{text}"
-                )
+                // Hermes has no per-launch MCP config, so it cannot call
+                // propose_draft. Asking it to would forbid the plain-text
+                // draft the owner has to apply.
+                let draft = if Provider::of_job(&job)? == Provider::Hermes {
+                    "When the owner asks to create or revise an email draft, write the complete subject and body as plain text. The owner reviews and applies it; there is no draft tool and nothing sends mail. For other questions, answer normally.\n\n"
+                } else {
+                    "When the owner asks to create or revise an email draft, call the available propose_draft tool with the complete subject and body. The tool records a proposal for human review; it does not edit or send mail. Do not substitute a plain-text draft for the tool call. For other questions, answer normally.\n\n"
+                };
+                format!("{MAIL_ROLE}\n\n{INSTRUCTIONS}{draft}{text}")
             }
         };
         if prompt.len() > INPUT_LIMIT {

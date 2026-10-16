@@ -151,3 +151,92 @@ fn completion_requires_identity_and_last_step_success() {
     assert!(stream.accept(json!({"type":"text","sessionID":"ses_other","part":{"id":"b","type":"text","text":"Wrong session"}})).is_err());
     assert_eq!(stream.session_id(), "ses_123Abc");
 }
+
+const HERMES_SESSION: &str = "20250305_091523_a1b2c3";
+
+fn hermes() -> ProviderStream {
+    let mut stream = ProviderStream::new(
+        Provider::Hermes,
+        vec![json!({"role":"user","text":"Question"})],
+    )
+    .unwrap();
+    stream
+        .accept(
+            json!({"type":"system","subtype":"init","session_id":HERMES_SESSION,"model":"fixture"}),
+        )
+        .unwrap();
+    stream
+}
+
+#[test]
+fn hermes_stream_keeps_deltas_drops_tool_payloads_and_requires_its_session() {
+    let mut stream = hermes();
+    stream
+        .accept(json!({"type":"text","text":"Hello "}))
+        .unwrap();
+    stream
+        .accept(json!({"type":"tool_use","name":"terminal","input":"SECRET tool"}))
+        .unwrap();
+    stream
+        .accept(json!({"type":"tool_result","name":"terminal","output":"SECRET result","is_error":false}))
+        .unwrap();
+    stream
+        .accept(json!({"type":"text","text":"مرحبا"}))
+        .unwrap();
+    let partial = stream.display();
+    assert!(
+        stream
+            .accept(json!({"type":"result","session_id":HERMES_SESSION,"exit_code":0,"text":"Not the answer","error":null}))
+            .is_err()
+    );
+    assert_eq!(stream.display(), partial);
+    stream
+        .accept(json!({"type":"result","session_id":HERMES_SESSION,"exit_code":0,"text":"Hello مرحبا","error":null}))
+        .unwrap();
+    assert!(stream.final_seen());
+    assert_eq!(stream.display()["output"], "Hello مرحبا");
+    assert_eq!(stream.session_id(), HERMES_SESSION);
+    let shown = stream.display();
+    let answers: Vec<_> = shown["transcript"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["role"] == "assistant")
+        .collect();
+    assert_eq!(answers.len(), 1);
+    assert_eq!(answers[0]["text"], "Hello مرحبا");
+    assert!(stream.display().to_string().contains("Using a tool"));
+    assert!(!stream.display().to_string().contains("SECRET"));
+    assert_eq!(
+        stream.accept(json!({"type":"text","text":"more"})),
+        Err(INVALID)
+    );
+    assert_eq!(stream.display()["output"], "Hello مرحبا");
+
+    let mut failed = hermes();
+    failed.accept(json!({"type":"text","text":"Safe"})).unwrap();
+    let before = failed.display();
+    assert_eq!(
+        failed.accept(json!({"type":"result","session_id":HERMES_SESSION,"exit_code":1,"error":"SECRET failure","text":"SECRET"})),
+        Err(FAILED)
+    );
+    assert_eq!(failed.display(), before);
+    assert!(!failed.display().to_string().contains("SECRET"));
+
+    let mut unidentified = ProviderStream::new(Provider::Hermes, vec![]).unwrap();
+    unidentified
+        .accept(json!({"type":"text","text":"answer"}))
+        .unwrap();
+    assert!(
+        unidentified
+            .accept(json!({"type":"result","exit_code":0,"text":"answer"}))
+            .is_err()
+    );
+    assert!(!unidentified.final_seen());
+    assert!(
+        ProviderStream::new(Provider::Hermes, vec![])
+            .unwrap()
+            .accept(json!({"type":"system","subtype":"init","session_id":"latest"}))
+            .is_err()
+    );
+}

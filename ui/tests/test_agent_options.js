@@ -8,6 +8,8 @@ for (const [label,provider] of [['OpenCode','opencode'],['Codex','codex'],['Clau
   assert.deepEqual(copy(options.startOptions(payload,label,'test/model#variant',6)), {params:{payload,provider,model:'test/model#variant'}})
   assert(options.startOptions(payload,label,'',5).error)
 }
+assert(options.startOptions(payload,'Hermes','',7).error.includes('API 8'))
+assert.deepEqual(copy(options.startOptions(payload,'Hermes','chosen',8)), {params:{payload,provider:'hermes',model:'chosen'}})
 assert(options.startOptions(payload,'System default','selected',5).error)
 for (const model of ['--auto','a b','a\nb','a\u0000b','$(touch /tmp/forbidden)','x'.repeat(201)]) {
   assert(options.startOptions(payload,'OpenCode',model,6).error)
