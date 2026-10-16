@@ -28,6 +28,9 @@ impl ProviderStream {
     pub fn progress(&self) -> &str {
         self.display.progress()
     }
+    pub fn provider(&self) -> Provider {
+        self.provider
+    }
     pub fn session_id(&self) -> &str {
         self.display.session_id()
     }

@@ -12,7 +12,7 @@ function provider(value) {
 function validModel(value) {
   return value === "" || (value.length <= 200 && /^[a-zA-Z0-9][a-zA-Z0-9._\/:#@+\-]*$/.test(value))
 }
-function startOptions(payload, selectedAgent, selectedModel, apiVersion) {
+function startOptions(payload, selectedAgent, selectedModel, selectedInference, apiVersion) {
   var parsed = payload
   if (typeof parsed === "string") {
     try { parsed = JSON.parse(parsed) } catch (e) { return { params: {payload: payload} } }
@@ -20,8 +20,10 @@ function startOptions(payload, selectedAgent, selectedModel, apiVersion) {
   // Follow-ups belong to the provider and model saved with their parent.
   if (parsed && parsed.parent) return { params: {payload: payload} }
   var model = String(selectedModel || "").trim()
+  var inference = String(selectedInference || "").trim()
   var selected = provider(selectedAgent)
   if (!validModel(model)) return { error: "Enter a model ID without spaces or control characters (up to 200 characters)." }
+  if (!validModel(inference)) return { error: "Enter a provider ID without spaces or control characters (up to 200 characters)." }
   if ((selected !== "" || model !== "") && !(Number(apiVersion) >= 6))
     return { error: "Update the mail backend to choose an AI agent or model (API 6 required)." }
   if (selected === "hermes" && !(Number(apiVersion) >= 8))
@@ -29,5 +31,6 @@ function startOptions(payload, selectedAgent, selectedModel, apiVersion) {
   var params = {payload: payload}
   if (selected !== "") params.provider = selected
   if (model !== "") params.model = model
+  if (inference !== "" && Number(apiVersion) >= 8) params.inferenceProvider = inference
   return { params: params }
 }

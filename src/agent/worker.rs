@@ -105,7 +105,8 @@ pub async fn run(id: &str) -> Result<(), &'static str> {
     let proposals = job["kind"] != "events";
     let resume_id = job["resume"].as_str().unwrap_or("").to_owned();
     let resume = resume_id.as_str();
-    let model = job["model"].as_str().unwrap_or("");
+    let model_override = job["model"].as_str().unwrap_or("").to_owned();
+    let inference_override = job["inferenceProvider"].as_str().unwrap_or("").to_owned();
     let _claude_settings = (provider == Provider::Claude)
         .then(|| super::config::ClaudeSettings(path.join(id).join("claude-settings.json")));
     let turn_path = path.join(id);
@@ -138,10 +139,28 @@ pub async fn run(id: &str) -> Result<(), &'static str> {
             return Store::open()?.write_json(id,"job.json",&job);
         }
     };
-    let command = if let Some(lease) = &lease {
-        lease.command(&turn_path, &prepared_session, model, proposals)?
+    let (model, inference) = if provider == Provider::Hermes {
+        match super::hermes_config::resolve(&inference_override, &model_override) {
+            Ok(endpoint) => (endpoint.model, endpoint.provider),
+            Err(message) => {
+                // Fail in-process. Returning here would leave the job running
+                // until a later refresh noticed the worker had exited.
+                job["state"] = "failed".into();
+                job["progress"] = "Failed".into();
+                job["error"] = message.into();
+                job["updated"] = now().into();
+                job["resultReady"] = false.into();
+                job.as_object_mut().ok_or(INVALID)?.remove("pid");
+                return Store::open()?.write_json(id, "job.json", &job);
+            }
+        }
     } else {
-        provider.isolated_command(&path, resume, model, id, proposals)?
+        (model_override, String::new())
+    };
+    let command = if let Some(lease) = &lease {
+        lease.command(&turn_path, &prepared_session, &model, proposals)?
+    } else {
+        provider.isolated_command(&path, resume, &model, &inference, id, proposals)?
     };
     if !prepared_session.is_empty() {
         let store = Store::open()?;
@@ -280,6 +299,31 @@ pub async fn run(id: &str) -> Result<(), &'static str> {
         job["error"] = failure.into();
     }
     store.write_json(id, "job.json", &job)
+}
+
+fn accept_stdout_line(parser: &mut ProviderStream, line: &[u8]) -> Result<bool, &'static str> {
+    if line.iter().all(u8::is_ascii_whitespace) {
+        return Ok(false);
+    }
+    match serde_json::from_slice::<Value>(line) {
+        Ok(value) => {
+            parser.accept(value)?;
+            Ok(true)
+        }
+        // Diagnostic lines such as `Session: local-<hex>` are not events.
+        // A broken object or array is still invalid.
+        Err(_) if parser.provider() == Provider::Hermes && !json_prefix(line) => Ok(false),
+        Err(_) => Err(INVALID),
+    }
+}
+
+fn json_prefix(line: &[u8]) -> bool {
+    matches!(
+        line.iter()
+            .copied()
+            .find(|byte| !byte.is_ascii_whitespace()),
+        Some(b'{' | b'[')
+    )
 }
 
 struct Outcome {
@@ -455,9 +499,7 @@ async fn execute<F: Future<Output = ()>, P: FnMut(&ProviderStream) -> Result<(),
             }
             for byte in &out[..n] {
                 if *byte == b'\n' {
-                    if !pending.iter().all(u8::is_ascii_whitespace) {
-                        let value: Value = serde_json::from_slice(&pending).map_err(|_| INVALID)?;
-                        parser.accept(value)?;
+                    if accept_stdout_line(parser, &pending)? {
                         changed = true;
                     }
                     pending.clear();
@@ -470,7 +512,13 @@ async fn execute<F: Future<Output = ()>, P: FnMut(&ProviderStream) -> Result<(),
             }
         }
         if !pending.iter().all(u8::is_ascii_whitespace) {
-            return Err("The AI stream ended with an incomplete event. Retry this request.");
+            // Hermes prints a session banner without requiring a trailing
+            // newline. Other providers still need a finished JSON event.
+            if parser.provider() == Provider::Hermes {
+                accept_stdout_line(parser, &pending)?;
+            } else {
+                return Err("The AI stream ended with an incomplete event. Retry this request.");
+            }
         }
         while !group.exited().map_err(|_| INVALID)? {
             tokio::time::sleep(Duration::from_millis(25)).await;

@@ -46,12 +46,13 @@ impl Provider {
         path: &Path,
         resume: &str,
         model: &str,
+        inference: &str,
         id: &str,
         proposals: bool,
     ) -> Result<Command, &'static str> {
         super::storage::check_id(id)?;
         let exe = std::env::current_exe().map_err(|_| "agent_worker_unavailable")?;
-        let mut command = self.command(path, resume, model)?;
+        let mut command = self.command(path, resume, model, inference)?;
         match self {
             Self::Claude => {
                 command.args(["--tools", "", "--strict-mcp-config"]);
@@ -138,23 +139,20 @@ impl Provider {
                 (1..=128).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric())
             })
         } else if self == Self::Hermes {
-            // CLI sessions use a 6-hex suffix; gateway sessions use 8. Titles,
-            // `latest` and prefixes are not accepted: only this exact id may
-            // cross argv as `--resume`.
-            let bytes = id.as_bytes();
-            // YYYYMMDD_HHMMSS_ + 6 hex (CLI) or 8 hex (gateway).
-            matches!(bytes.len(), 22 | 24)
-                && bytes[8] == b'_'
-                && bytes[15] == b'_'
-                && bytes[..8].iter().all(u8::is_ascii_digit)
-                && bytes[9..15].iter().all(u8::is_ascii_digit)
-                && bytes[16..].iter().all(u8::is_ascii_hexdigit)
+            hermes_session(id)
         } else {
             super::jobs::session(id)
         }
     }
-    fn command(self, path: &Path, resume: &str, model: &str) -> Result<Command, &'static str> {
+    fn command(
+        self,
+        path: &Path,
+        resume: &str,
+        model: &str,
+        inference: &str,
+    ) -> Result<Command, &'static str> {
         validate_model(model)?;
+        validate_model(inference)?;
         if !resume.is_empty() && !self.session(resume) {
             return Err("agent_invalid_session");
         }
@@ -203,6 +201,11 @@ impl Provider {
                 // the only built-in toolset and cannot send mail or run a shell.
                 // Hermes has no per-launch MCP config, so propose_draft is not
                 // attached; the answer stays text for the owner to apply.
+                // `--ignore-user-config` hides the profile default, so both
+                // flags are required. Callers resolve blanks from the config.
+                if model.is_empty() || inference.is_empty() {
+                    return Err("agent_hermes_endpoint");
+                }
                 command.args([
                     "chat",
                     "--oneshot",
@@ -220,13 +223,30 @@ impl Provider {
                 if !resume.is_empty() {
                     command.args(["--resume", resume]);
                 }
+                command.args(["--provider", inference, "--model", model]);
             }
         }
-        if !model.is_empty() {
+        if self != Self::Hermes && !model.is_empty() {
             command.args(["--model", model]);
         }
         Ok(command)
     }
+}
+
+fn hermes_session(id: &str) -> bool {
+    // Dated CLI ids use a 6-hex suffix; gateway ids use 8. One-shot stdout
+    // also names `local-<hex>`. Titles, `latest` and prefixes stay rejected.
+    let bytes = id.as_bytes();
+    let dated = matches!(bytes.len(), 22 | 24)
+        && bytes[8] == b'_'
+        && bytes[15] == b'_'
+        && bytes[..8].iter().all(u8::is_ascii_digit)
+        && bytes[9..15].iter().all(u8::is_ascii_digit)
+        && bytes[16..].iter().all(u8::is_ascii_hexdigit);
+    let local = id.strip_prefix("local-").is_some_and(|suffix| {
+        (1..=64).contains(&suffix.len()) && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+    });
+    dated || local
 }
 
 pub fn validate_model(model: &str) -> Result<(), &'static str> {

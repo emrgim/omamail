@@ -239,4 +239,9 @@ fn hermes_stream_keeps_deltas_drops_tool_payloads_and_requires_its_session() {
             .accept(json!({"type":"system","subtype":"init","session_id":"latest"}))
             .is_err()
     );
+    let mut local = ProviderStream::new(Provider::Hermes, vec![]).unwrap();
+    local
+        .accept(json!({"type":"system","subtype":"init","session_id":"local-a1b2c3","model":""}))
+        .unwrap();
+    assert_eq!(local.session_id(), "local-a1b2c3");
 }

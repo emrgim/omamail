@@ -185,8 +185,10 @@ Item {
       compare(bridge.requests.length, 0)
       verify(runner.lastError.indexOf("API 8") >= 0)
       bridge.apiVersion = 8
+      runner.selectedInferenceProvider = "xai-oauth"
       verify(runner.start({prompt:"Question"}))
       compare(bridge.requests[0].params.provider, "hermes")
+      compare(bridge.requests[0].params.inferenceProvider, "xai-oauth")
     }
     function test_selection_cutoff_survives_reload_without_losing_new_chats() {
       runner.selectedAgent = "Codex"
@@ -196,6 +198,11 @@ Item {
       verify(runner.canContinueSelection({id:"new",provider:"codex",created:101}))
       runner.selectedModel = "chosen"
       verify(!runner.canContinueSelection({id:"new",provider:"codex",created:101}))
+      runner.selectedModel = ""
+      verify(runner.canContinueSelection({id:"new",provider:"codex",created:101}))
+      runner.selectedInferenceProvider = "xai-oauth"
+      verify(!runner.canContinueSelection({id:"new",provider:"codex",created:101,inferenceProvider:""}))
+      verify(runner.canContinueSelection({id:"new",provider:"codex",created:101,inferenceProvider:"xai-oauth"}))
     }
     function test_prepared_context_keeps_its_captured_selection() {
       runner.selectedAgent = "OpenCode"

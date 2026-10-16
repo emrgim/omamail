@@ -55,7 +55,7 @@ make app-run
 - **Multiple mailboxes:** Gmail, Outlook, HEY, JMAP and IMAP/SMTP, including Fastmail, iCloud and self-hosted servers.
 - **Mail and calendar:** read, search, compose, manage attachments and respond to meeting invitations. Available actions depend on your provider.
 - **Keyboard navigation:** `j`/`k` to move, `r` to reply, `c` to compose, `/` to search and `?` for all shortcuts.
-- **AI assistance in Omarchy:** ask about selected messages and review suggested drafts with Claude, OpenCode V2, Codex or Hermes. Follow your Omarchy default, or select an agent and optional model in Settings. An unsupported system default disables the AI action with a setup explanation. Conversations retain follow-ups and draft proposals; Hermes answers in text for you to apply. `/clear`, `/history` and `/diagnose` manage the chat.
+- **AI assistance in Omarchy:** ask about selected messages and review suggested drafts with Claude, OpenCode V2, Codex or Hermes. Follow your Omarchy default, or select an agent and optional model in Settings. An unsupported system default disables the AI action with a setup explanation. Conversations retain follow-ups and draft proposals; Hermes answers in text for you to apply. A blank Hermes provider and model are read from the Hermes config, and Settings can override each. `/clear`, `/history` and `/diagnose` manage the chat.
 - **Desktop integration:** native notifications and a compact layout for smaller windows; the Omarchy plugin also provides the bar widget and `mailto:` integration.
 - **Privacy controls:** credentials stored in the system keyring and remote images blocked until you choose to load them.
 

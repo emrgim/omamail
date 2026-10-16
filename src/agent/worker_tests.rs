@@ -52,6 +52,57 @@ print(json.dumps({'type':'result','subtype':'success','result':'Visible answer'}
     assert!(!parser.display().to_string().contains("hidden credential"));
 }
 
+#[test]
+fn hermes_stdout_skips_session_banners_and_keeps_json_strict() {
+    let mut hermes = ProviderStream::new(
+        Provider::Hermes,
+        vec![json!({"role":"user","text":"Question"})],
+    )
+    .unwrap();
+    assert!(!accept_stdout_line(&mut hermes, b"Session: local-a1b2c3").unwrap());
+    assert!(
+        accept_stdout_line(
+            &mut hermes,
+            br#"{"type":"system","subtype":"init","session_id":"local-a1b2c3","model":""}"#,
+        )
+        .unwrap()
+    );
+    assert_eq!(hermes.session_id(), "local-a1b2c3");
+    assert!(accept_stdout_line(&mut hermes, b"  {not-json").is_err());
+    assert_eq!(hermes.session_id(), "local-a1b2c3");
+    let mut claude = parser();
+    assert!(accept_stdout_line(&mut claude, b"Session: local-aa").is_err());
+}
+
+#[tokio::test]
+async fn hermes_session_banner_does_not_fail_the_turn() {
+    let script = r#"import sys,json
+sys.stdin.read()
+print('Session: local-a1b2c3', flush=True)
+print(json.dumps({'type':'system','subtype':'init','session_id':'local-a1b2c3','model':''}))
+print(json.dumps({'type':'text','text':'Hello'}))
+print(json.dumps({'type':'result','session_id':'local-a1b2c3','exit_code':0,'text':'Hello','error':None}))
+sys.stdout.write('Session: local-a1b2c3')
+"#;
+    let mut parser = ProviderStream::new(
+        Provider::Hermes,
+        vec![json!({"role":"user","text":"Question"})],
+    )
+    .unwrap();
+    let result = execute(
+        fake(script),
+        b"Synthetic secret on stdin",
+        &mut parser,
+        Duration::from_secs(5),
+        std::future::pending(),
+        |_| Ok(()),
+    )
+    .await;
+    assert_eq!(result.failure, None);
+    assert_eq!(parser.session_id(), "local-a1b2c3");
+    assert_eq!(parser.display()["output"], "Hello");
+}
+
 #[tokio::test]
 async fn incomplete_nonzero_and_invalid_events_cannot_succeed() {
     for script in [
